@@ -160,6 +160,13 @@ fun TacticalControlCenterScreen(
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
+                    icon = { Icon(Icons.Default.Check, contentDescription = null) },
+                    label = { Text("الجرد الميداني", fontWeight = FontWeight.Bold, fontSize = 11.sp) },
+                    modifier = Modifier.testTag("tab_inventory_audit")
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 4,
+                    onClick = { selectedTab = 4 },
                     icon = { Icon(Icons.Default.Search, contentDescription = null) },
                     label = { Text("السجلات والتقارير", fontWeight = FontWeight.Bold, fontSize = 11.sp) },
                     modifier = Modifier.testTag("tab_reports")
@@ -188,7 +195,12 @@ fun TacticalControlCenterScreen(
                     unitHoldings = unitHoldings,
                     viewModel = viewModel
                 )
-                3 -> ReportsAndLogsTab(
+                3 -> FieldInventoryTab(
+                    viewModel = viewModel,
+                    warehouseBalance = warehouseBalance,
+                    unitHoldings = unitHoldings
+                )
+                4 -> ReportsAndLogsTab(
                     transactions = transactions,
                     dailyReports = dailyReports,
                     monthlyReports = monthlyReports,
@@ -1910,6 +1922,627 @@ fun ReportSummaryCard(report: AmmoViewModel.ReportSummary) {
                     }
                 }
             }
+        }
+    }
+}
+
+// ==========================================
+// NEW TAB: FieldInventoryTab (قسم الجرد الميداني والمطابقة اللحظية)
+// ==========================================
+@Composable
+fun FieldInventoryTab(
+    viewModel: AmmoViewModel,
+    warehouseBalance: Map<String, Int>,
+    unitHoldings: Map<String, Map<String, Int>>
+) {
+    val context = LocalContext.current
+    
+    // Selection state: 0 = Main Warehouse, 1 = Sub-Unit
+    var auditTargetType by remember { mutableStateOf(0) }
+    
+    // Sub-Unit target details
+    var selectedBattalion by remember { mutableStateOf("الكتيبة 1") }
+    var selectedCompany by remember { mutableStateOf("السرية 1") }
+    var selectedPlatoon by remember { mutableStateOf("الفصيل 1") }
+    
+    var selectedAmmo by remember { mutableStateOf(AmmoType.AUTOMATIC) }
+    
+    // System computed balance
+    val computedSystemBalance = remember(auditTargetType, selectedBattalion, selectedCompany, selectedPlatoon, selectedAmmo, warehouseBalance, unitHoldings) {
+        if (auditTargetType == 0) {
+            warehouseBalance.getOrDefault(selectedAmmo.displayName, 0)
+        } else {
+            val formattedUnit = run {
+                val b = selectedBattalion.trim().replace("الكتيبة", "ك").replace(" ", "")
+                val c = selectedCompany.trim().replace("السرية", "س").replace(" ", "")
+                val p = selectedPlatoon.trim().replace("الفصيل", "ف").replace(" ", "")
+                listOf(b, c, p).filter { it.isNotEmpty() }.joinToString(" ")
+            }
+            unitHoldings[formattedUnit]?.get(selectedAmmo.displayName) ?: 0
+        }
+    }
+    
+    // Actual Field Stock input
+    var actualStockText by remember { mutableStateOf("") }
+    
+    // Clean default initialization triggered automatically when target or ammo changes
+    LaunchedEffect(computedSystemBalance) {
+        actualStockText = computedSystemBalance.toString()
+    }
+    
+    val actualStockValue = actualStockText.toIntOrNull() ?: 0
+    val discrepancy = actualStockValue - computedSystemBalance
+    
+    var officerName by remember { mutableStateOf("رائد ركن / يوسف الشمري") }
+    var auditNotes by remember { mutableStateOf("") }
+    
+    // Auto-update the default audit notes draft
+    LaunchedEffect(computedSystemBalance, actualStockValue, discrepancy, selectedAmmo, auditTargetType, selectedBattalion) {
+        val targetLabel = if (auditTargetType == 0) "المستودع الرئيسي" else "$selectedBattalion-$selectedCompany-$selectedPlatoon"
+        auditNotes = when {
+            discrepancy == 0 -> "تم الجرد الميداني لـ ($targetLabel) لصنف (${selectedAmmo.displayName}) وتبين مطابقة الرصيد الفعلي تماماً مع الرصيد الدفتري."
+            discrepancy < 0 -> "محضر إثبات عجز ميداني صنف (${selectedAmmo.displayName}) بمقدار ${Math.abs(discrepancy)} ${selectedAmmo.unitName} في ($targetLabel)."
+            else -> "محضر إثبات فائض ميداني غير مقيد صنف (${selectedAmmo.displayName}) بمقدار $discrepancy ${selectedAmmo.unitName} في ($targetLabel)."
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Core Tactical Header
+        item {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "منظومة المطابقة والتدقيق الميداني للذخيرة",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "مقارنة الأرصدة الفعلية المقيسة في الميدان بالأرصدة الدفترية اللحظية للنظام",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                        Text("🛡️", fontSize = 28.sp)
+                    }
+                }
+            }
+        }
+        
+        // Target Selector Block
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(1.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "1. تحديد المستودع أو الوحدة الميدانية المستهدفة بالجرد:",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Button(
+                            onClick = { auditTargetType = 0 },
+                            modifier = Modifier.weight(1f).testTag("select_warehouse_audit"),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (auditTargetType == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Text(
+                                "المستودع الرئيسي للواء",
+                                color = if (auditTargetType == 0) Color.White else MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+                        Button(
+                            onClick = { auditTargetType = 1 },
+                            modifier = Modifier.weight(1f).testTag("select_subunit_audit"),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (auditTargetType == 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Text(
+                                "وحدة فرعية ميدانية",
+                                color = if (auditTargetType == 1) Color.White else MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                    
+                    if (auditTargetType == 1) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        ) {
+                            // Suggest list of active unit holdings to easily select
+                            if (unitHoldings.isNotEmpty()) {
+                                Text(
+                                    "الوحدات ذات العهود الجارية بالخدمة (انقر للاختيار التلقائي):",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.Gray
+                                )
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                                ) {
+                                    items(unitHoldings.keys.toList()) { activeUnit ->
+                                        // Deconstruct codes like "ك1 س2 ف1" or arbitrary
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(MaterialTheme.colorScheme.secondaryContainer)
+                                                .clickable {
+                                                    // Quick match if possible (approximate)
+                                                    val parts = activeUnit.split(" ")
+                                                    parts.forEach { part ->
+                                                        if (part.startsWith("ك")) {
+                                                            val num = part.replace("ك", "")
+                                                            selectedBattalion = "الكتيبة $num"
+                                                        } else if (part.startsWith("س")) {
+                                                            val num = part.replace("س", "")
+                                                            selectedCompany = "السرية $num"
+                                                        } else if (part.startsWith("ف")) {
+                                                            val num = part.replace("ف", "")
+                                                            selectedPlatoon = "الفصيل $num"
+                                                        }
+                                                    }
+                                                }
+                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            Text(
+                                                "جرد: $activeUnit",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = selectedBattalion,
+                                    onValueChange = { selectedBattalion = it },
+                                    label = { Text("الكتيبة") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f).testTag("audit_battalion_input")
+                                )
+                                OutlinedTextField(
+                                    value = selectedCompany,
+                                    onValueChange = { selectedCompany = it },
+                                    label = { Text("السرية") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f).testTag("audit_company_input")
+                                )
+                                OutlinedTextField(
+                                    value = selectedPlatoon,
+                                    onValueChange = { selectedPlatoon = it },
+                                    label = { Text("الفصيل") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f).testTag("audit_platoon_input")
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Ammunition Selector Block
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(1.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "2. اختر نوع العتاد أو الذخيرة المراد معاينتها:",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    var expandedAmmo by remember { mutableStateOf(false) }
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { expandedAmmo = true },
+                            modifier = Modifier.fillMaxWidth().testTag("audit_ammo_dropdown_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${selectedAmmo.displayName} (${selectedAmmo.description})",
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = expandedAmmo,
+                            onDismissRequest = { expandedAmmo = false },
+                            modifier = Modifier.fillMaxWidth(0.9f)
+                        ) {
+                            AmmoType.values().forEach {
+                                DropdownMenuItem(
+                                    text = { Text("${it.displayName} [${it.unitName}] - ${it.description}") },
+                                    onClick = {
+                                        selectedAmmo = it
+                                        expandedAmmo = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Reconciliation Calculator Box
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(2.dp),
+                border = BorderStroke(
+                    1.dp,
+                    when {
+                        discrepancy == 0 -> Color(0xFF28A745).copy(alpha = 0.3f)
+                        discrepancy < 0 -> Color(0xFFDC3545).copy(alpha = 0.3f)
+                        else -> Color(0xFFFF8C00).copy(alpha = 0.3f)
+                    }
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "3. تقرير المقارنة وحساب الفوارق الميدانية اللحظية:",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Left: Ledger System
+                        Column(horizontalAlignment = Alignment.Start) {
+                            Text("الرصيد النظامي (الدفتر):", fontSize = 11.sp, color = Color.Gray)
+                            Text(
+                                text = "${String.format("%,d", computedSystemBalance)} ${selectedAmmo.unitName}",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        
+                        // Icon matching state
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(
+                                    when {
+                                        discrepancy == 0 -> Color(0xFF28A745).copy(alpha = 0.1f)
+                                        discrepancy < 0 -> Color(0xFFDC3545).copy(alpha = 0.1f)
+                                        else -> Color(0xFFFF8C00).copy(alpha = 0.1f)
+                                    }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = when {
+                                    discrepancy == 0 -> "🟢"
+                                    discrepancy < 0 -> "🔴"
+                                    else -> "🟡"
+                                },
+                                fontSize = 18.sp
+                            )
+                        }
+                        
+                        // Right: Physical Inventory Input
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("الرصيد الفعلي (المقاس):", fontSize = 11.sp, color = Color.Gray)
+                            Text(
+                                text = "${String.format("%,d", actualStockValue)} ${selectedAmmo.unitName}",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Black,
+                                color = when {
+                                    discrepancy == 0 -> Color(0xFF28A745)
+                                    discrepancy < 0 -> Color(0xFFDC3545)
+                                    else -> Color(0xFFFF8C00)
+                                }
+                            )
+                        }
+                    }
+                    
+                    Divider(modifier = Modifier.padding(vertical = 4.dp))
+                    
+                    // Input Textfield for Physical Stock
+                    OutlinedTextField(
+                        value = actualStockText,
+                        onValueChange = { actualStockText = it },
+                        label = { Text("أدخل الرصيد المكتشف ميدانياً بالعد اليدوي") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("actual_stock_input"),
+                        suffix = { Text(selectedAmmo.unitName) }
+                    )
+                    
+                    // Qty offsets
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val offsets = listOf(-100, -10, 10, 100)
+                        offsets.forEach { offset ->
+                            OutlinedButton(
+                                onClick = {
+                                    val current = actualStockText.toIntOrNull() ?: 0
+                                    actualStockText = "${Math.max(0, current + offset)}"
+                                },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Text(if (offset > 0) "+$offset" else "$offset", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    
+                    // Discrepancy Status card
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                when {
+                                    discrepancy == 0 -> Color(0xFF28A745).copy(alpha = 0.15f)
+                                    discrepancy < 0 -> Color(0xFFDC3545).copy(alpha = 0.15f)
+                                    else -> Color(0xFFFF8C00).copy(alpha = 0.15f)
+                                }
+                            )
+                            .padding(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = when {
+                                    discrepancy == 0 -> "الحالة: مطابق بنسبة 100% ✅"
+                                    discrepancy < 0 -> "الحالة: عجز بوزن مخزني ⚠️"
+                                    else -> "الحالة: فائض وارد غير مقيد 🔍"
+                                },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = when {
+                                    discrepancy == 0 -> Color(0xFF19692C)
+                                    discrepancy < 0 -> Color(0xFFA71D2A)
+                                    else -> Color(0xFFB05C00)
+                                }
+                            )
+                            Text(
+                                text = when {
+                                    discrepancy == 0 -> "الأرصدة المسجلة متناسقة وبحالة جاهزية تامة دون وجود انتهاكات أو مفقودات."
+                                    discrepancy < 0 -> "يوجد نقص قدره (${Math.abs(discrepancy)} ${selectedAmmo.unitName}). لضمان دقة السجلات، يجب إجراء مطالبة تسوية بخصم الكمية ومراجعة المسؤولين لتفادي الفقد العسكري."
+                                    else -> "توجد زيادة قدرها ($discrepancy ${selectedAmmo.unitName}). يرجى قيد وثيقة التسوية لتسجيل الفائض في جداول عهدة الجهة وضبط اللوائح."
+                                },
+                                fontSize = 10.sp,
+                                color = when {
+                                    discrepancy == 0 -> Color(0xFF19692C)
+                                    discrepancy < 0 -> Color(0xFFA71D2A)
+                                    else -> Color(0xFFB05C00)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Command Submit & Accountability Block
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(1.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "4. ضباط لجان الجرد والمصادقة على القيد:",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    OutlinedTextField(
+                        value = officerName,
+                        onValueChange = { officerName = it },
+                        label = { Text("قائد مفرزة الجرد / ضابط السلاح المسؤول") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("audit_officer_input")
+                    )
+                    
+                    OutlinedTextField(
+                        value = auditNotes,
+                        onValueChange = { auditNotes = it },
+                        label = { Text("البند والبيان الرسمي للتسوية المكتشفة") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    
+                    Button(
+                        onClick = {
+                            if (officerName.isEmpty()) {
+                                Toast.makeText(context, "خطأ: يجب تسجيل اسم ضابط الجرد المسؤول للمساءلة والمصادقة", Toast.LENGTH_LONG).show()
+                                return@Button
+                            }
+                            
+                            // Let's decide adjustment strategy
+                            if (discrepancy == 0) {
+                                Toast.makeText(context, "إشعار: الأرصدة مطابقة تماماً. تم تسجيل جرد مطابق لغرفة المراقبة تلقائياً.", Toast.LENGTH_LONG).show()
+                            } else if (discrepancy < 0) {
+                                val absDiff = Math.abs(discrepancy)
+                                if (auditTargetType == 0) {
+                                    // Main warehouse deficit: record Disbursement (صرف) with special tag
+                                    viewModel.addTransaction(
+                                        type = "صرف",
+                                        battalion = "تسوية عجز",
+                                        company = "المستودع الرئيسي",
+                                        platoon = "",
+                                        ammoType = selectedAmmo.displayName,
+                                        quantity = absDiff,
+                                        officerName = officerName,
+                                        notes = auditNotes,
+                                        onSuccess = {
+                                            Toast.makeText(context, "نجاح: تم شطب العجز من المستودع الرئيسي بمقدار $absDiff وتطوير الأرصدة.", Toast.LENGTH_LONG).show()
+                                        }
+                                    )
+                                } else {
+                                    // Sub-unit has deficit
+                                    viewModel.addTransaction(
+                                        type = "استلام",
+                                        battalion = selectedBattalion,
+                                        company = selectedCompany,
+                                        platoon = selectedPlatoon,
+                                        ammoType = selectedAmmo.displayName,
+                                        quantity = absDiff,
+                                        officerName = officerName,
+                                        notes = "تسوية عجز وحدة ميدانية (تخفيض عهدة): $auditNotes",
+                                        onSuccess = {
+                                            viewModel.addTransaction(
+                                                type = "صرف",
+                                                battalion = "شطب تسوية",
+                                                company = "عجز وحدة",
+                                                platoon = "",
+                                                ammoType = selectedAmmo.displayName,
+                                                quantity = absDiff,
+                                                officerName = officerName,
+                                                notes = "تقرير شطب عسكري لتغطية عجز عهدة تم استردادها دفترياً من $selectedBattalion",
+                                                onSuccess = {
+                                                    Toast.makeText(context, "نجاح: تم تخفيض عهدة الوحدة بمقدار $absDiff وشطبها عسكرياً لتصفية العجز.", Toast.LENGTH_LONG).show()
+                                                    actualStockText = computedSystemBalance.toString()
+                                                }
+                                            )
+                                        }
+                                    )
+                                }
+                            } else {
+                                // Surplus
+                                if (auditTargetType == 0) {
+                                    viewModel.addTransaction(
+                                        type = "توريد",
+                                        battalion = "",
+                                        company = "",
+                                        platoon = "",
+                                        ammoType = selectedAmmo.displayName,
+                                        quantity = discrepancy,
+                                        officerName = officerName,
+                                        notes = auditNotes,
+                                        onSuccess = {
+                                            Toast.makeText(context, "نجاح: تم قيد فائض المستودع وزيادة رصيد السجلات بمقدار $discrepancy.", Toast.LENGTH_LONG).show()
+                                        }
+                                    )
+                                } else {
+                                    viewModel.addTransaction(
+                                        type = "صرف",
+                                        battalion = selectedBattalion,
+                                        company = selectedCompany,
+                                        platoon = selectedPlatoon,
+                                        ammoType = selectedAmmo.displayName,
+                                        quantity = discrepancy,
+                                        officerName = officerName,
+                                        notes = "تسوية فائض وحدة ميدانية (إثبات عهدة زائدة): $auditNotes",
+                                        onSuccess = {
+                                            Toast.makeText(context, "نجاح: تم ترحيل وقيد الفائض لعهدة الوحدة بمقدار $discrepancy حبة.", Toast.LENGTH_LONG).show()
+                                        }
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("submit_audit_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = when {
+                                discrepancy == 0 -> Color(0xFF28A745)
+                                discrepancy < 0 -> Color(0xFFDC3545)
+                                else -> Color(0xFFFF8C00)
+                            }
+                        )
+                    ) {
+                        Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "تثبيت الجرد واعتماد التسوية اللحظية ⚔️",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+        
+        item {
+            Spacer(modifier = Modifier.height(30.dp))
         }
     }
 }
