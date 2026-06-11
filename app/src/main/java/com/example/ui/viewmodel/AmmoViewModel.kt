@@ -273,8 +273,6 @@ class AmmoViewModel(application: Application) : AndroidViewModel(application) {
     fun clearDatabase() {
         viewModelScope.launch {
             repository.clearAll()
-            // Reset seed automatically for clean experience
-            repository.seedInitialDataIfNeeded()
         }
     }
 
