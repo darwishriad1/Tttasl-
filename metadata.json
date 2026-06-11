@@ -1,0 +1,6 @@
+{
+  "name": "ذخائر اللواء",
+  "description": "نظام إدارة مخزون ذخائر عسكري متكامل لجرد وصرف مخزن اللواء والكتائب والمستوى الميداني",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

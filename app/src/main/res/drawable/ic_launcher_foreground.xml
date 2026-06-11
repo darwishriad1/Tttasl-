@@ -1,0 +1,23 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Star Emblem representing Brigade leadership -->
+    <path
+        android:fillColor="#E1C694"
+        android:pathData="M54,22 L62,39 L80,42 L67,55 L70,74 L54,65 L38,74 L41,55 L28,42 L46,39 Z" />
+
+    <!-- Crossed ammo boxes / ammunition lines styled perfectly -->
+    <path
+        android:fillColor="#8EA397"
+        android:pathData="M48,50 h12 v6 h-12 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#1E2522"
+        android:strokeWidth="1.5"
+        android:pathData="M38,46 h32 v18 h-32 z" />
+    <path
+        android:fillColor="#C15C5C"
+        android:pathData="M44,52 h20 v6 h-20 z" />
+</vector>
